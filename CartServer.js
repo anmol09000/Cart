@@ -5,7 +5,7 @@ app.use(function (req, res, next) {
   res.header("Access-Control-Allow-Origin", "*");
   res.header(
     "Access-Control-Allow-Headers",
-    "Origin, X-Requested-With, Content-Type, Accept,Authorization",
+    "Origin, X-Requested-With, Content-Type, Accept, Authorization",
   );
     res.header(
     "Access-Control-Allow-Methods",
@@ -13,7 +13,7 @@ app.use(function (req, res, next) {
   );
   next();
 });
-var port = process.env.PORT||2410;
+const port = 2410;
 app.listen(port, () => console.log(`Node app listening on port ${port}!`));
 const _ = require("lodash");
 
@@ -27,10 +27,37 @@ let pageSize=14;
 
 let wishList = [];
 let orders=[];
+let logsData=[];
+
+let users=[
+  {email:"test@gmail.com",password:"test123",role:"user",fname:"Agastya",lname:"Sharma",gender:"Male",mobile:"43781269471"},
+  {email:"admin@gmail.com",password:"admin123",role:"admin",fname:"Dhruv",lname:"Malik",gender:"Male",mobile:"9321782367"}
+];
 
 app.use(passport.initialize());
 
-let users=[{email:"test@gmail.com",password:"test123",role:"user",fname:"Agastya",lname:"Sharma",gender:"Male",mobile:"43781269471"}];
+let logActivity = (req, res, next) => {
+  passport.authenticate("roleAll", { session: false }, (err, user) => {
+    if (err) {
+      return next(err);
+    }
+
+    let userEmail = user ? user.email : "Anonymous";
+    
+    let data = {
+      LoginTime : req.url==="/user" && req.method==="GET" ? new Date() :"",
+      Time: new Date(),
+      url: req.url,
+      method: req.method,
+      user: userEmail,
+      LogoutTime : req.url==="/user" && req.method==="POST" ? new Date() :"",
+    };
+    logsData.push(data);
+    next();
+  })(req, res, next);
+};
+
+app.use(logActivity);
 
 let params = {
   jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
@@ -44,15 +71,27 @@ let StrategyAll = new localStrategy(params,function(token,done){
   }else{
     return done(null,user);
   }
+});
+let StrategyAdmin = new localStrategy(params,function(token,done){
+  let user = users.find((a)=>a.email === token.email);
+  if(!user){
+    return done(null,false,{message:"Check email or password"});
+  }else if(user.role!=="admin"){
+    return done(null,false,{message:"unauthorized"});
+  }else{
+    return done(null,user);
+  }
 })
 
 passport.use("roleAll",StrategyAll);
+passport.use("roleAdmin",StrategyAdmin);
 
 app.get("/products/:category/:brand",function(req,res){
     let {category,brand} = req.params;
     let {assured,ram,rating,price,sort,page,q} = req.query;
     let data = mobiles;
     let pageNum = +page;
+    console.log(req.user);
     if(q){
       data = data.filter((a)=>a.name.includes(q));
     }
@@ -184,3 +223,49 @@ app.get("/orders", passport.authenticate("roleAll", { session: false }), functio
   let userOrders = orders.filter((order) => order.email === req.user.email);
   res.send(userOrders);
 });
+
+app.get("/products",passport.authenticate("roleAdmin",{session:false}),function(req,res){
+  res.send(mobiles);
+});
+app.put("/product",passport.authenticate("roleAdmin",{session:false}),function(req,res){
+  let body = req.body;
+  let index = mobiles.findIndex((a)=>a.id === body.id);
+  if(index>=0){
+    let newProduct = {...body};
+    mobiles[index] = newProduct;
+    res.send(newProduct);
+  }else{
+    res.status(404).send("Not Found");
+  }
+});
+app.post("/product",passport.authenticate("roleAdmin",{session:false}),function(req,res){
+  let body = req.body;
+  let newItem = {id:`M${mobiles.length+1}`, ...body};
+  mobiles.push(newItem);
+  res.send(newItem);
+});
+app.post("/upload",passport.authenticate("roleAdmin",{session:false}),function(req,res){
+  let productsList = req.body;
+  let products = productsList.map((a)=>{
+    let index = mobiles.findIndex((b)=> b.id === a.id );
+    if(index>=0){
+      mobiles[index] = {...a};
+      return {...a}
+    }else{
+      mobiles.push({...a});
+      return null;
+    }
+  })
+  let edited = products.filter((a)=>a!==null);
+    res.send({
+      totalProducts : mobiles.length,
+      editedProducts : edited.length,
+    })
+})
+
+app.get("/logs",passport.authenticate("roleAdmin",{session:false}),function(req,res){
+  res.send(logsData);
+})
+
+
+
